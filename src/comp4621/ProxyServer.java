@@ -6,6 +6,10 @@ import java.net.InetAddress;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 
+/**
+ * Singleton Proxy Server
+ * It accepts all requests from clients and each request is assigned a new thread from thread pool.
+ */
 class ProxyServer {
 	static volatile boolean running = true;
 	private static final String IP = "127.0.0.1";

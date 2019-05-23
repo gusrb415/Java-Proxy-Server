@@ -14,6 +14,18 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadPoolExecutor;
 
+/**
+ * Request Handler
+ * Each request from the client is handled by this class.
+ * HTTPS request is just used to directly connect the client and the server.
+ * HTTP requests are looked into and passed to the server.
+ * The responses from the server is cached as well.
+ * However, for HTTP protocol other than GET, no cached file is used to return
+ * to the client since the request body may be different.
+ *
+ * For writing back to the client, since HTTP response may be in a format of
+ * bytes or texts, DataOutputStream is used since it handles both data.
+ */
 class RequestHandler implements Runnable {
 	private Socket clientToProxySocket;
 	private BufferedReader proxyToClientBr;
@@ -59,6 +71,8 @@ class RequestHandler implements Runnable {
 
 	static void blockUrl(String... urls) {
 		for (String url : urls) {
+		    if(url.isEmpty())
+		        continue;
 			blockedSites.add(url);
 			System.out.println(url + " added to the block list");
 		}

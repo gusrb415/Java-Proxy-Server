@@ -2,11 +2,19 @@ package comp4621;
 
 import java.util.Scanner;
 
+/**
+ * Main accepts websites to block for both HTTP and HTTPS (full url or keyword of the url can be used).
+ * e.g. To block google.com, just google can be used.
+ * Commands:
+ * "clear": to clear caches.
+ * "close": to close the server and remove caches.
+ */
 public class Main {
     public static void main(String[] args) {
         String[] blockList = {
                 "abc"
         };
+
 
         Thread command = new Thread(() -> {
             Scanner scanner = new Scanner(System.in);

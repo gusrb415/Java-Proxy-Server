@@ -6,6 +6,9 @@ import java.net.SocketTimeoutException;
 import java.util.Map;
 import java.util.concurrent.ThreadPoolExecutor;
 
+/**
+ * Helper static methods for Request Handler
+ */
 class Helper {
     final static String CRLF = "\r\n";
     private static ThreadPoolExecutor threadPool = ProxyServer.threadPool;
