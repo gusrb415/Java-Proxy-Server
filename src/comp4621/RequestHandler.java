@@ -182,6 +182,7 @@ class RequestHandler implements Runnable {
 			fileExtension = fileExtension.replaceAll("[^0-9a-zA-Z.]", "_");
 			fileName += fileExtension + ((checkHtml || fileExtension.isEmpty()) ? ".html" : "");
 
+			fileName = fileName.substring(0, Math.min(fileName.length(), 200));
 			File fileToCache = new File(CACHE_FOLDER + "/" + fileName);
 			DataOutputStream fileToCacheBW = new DataOutputStream(new FileOutputStream(fileToCache));
 			try {

@@ -12,7 +12,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 class Helper {
     final static String CRLF = "\r\n";
     private static ThreadPoolExecutor threadPool = ProxyServer.threadPool;
-    private final static int BUFFER_SIZE = 16384;
+    private final static int BUFFER_SIZE = 131072;
     private final static byte[] CRLF_BYTES = CRLF.getBytes();
 
     @SuppressWarnings("deprecation")
@@ -46,8 +46,9 @@ class Helper {
                         break;
                     }
                     bos.write(buffer, 0, read);
-
                     bytesRead += read;
+                    writeToAll(bos.toByteArray(), cacheDos, proxyToClientDos);
+                    bos.reset();
                 }
             } else {
                 while (true) {
@@ -62,6 +63,8 @@ class Helper {
                         bos.write(buffer, 0, read);
                         chunkSize -= read;
                     }
+                    writeToAll(bos.toByteArray(), cacheDos, proxyToClientDos);
+                    bos.reset();
                 }
                 bos.write(CRLF_BYTES);
             }
