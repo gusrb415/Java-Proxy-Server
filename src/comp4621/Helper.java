@@ -2,6 +2,7 @@ package comp4621;
 
 import java.io.*;
 import java.net.Socket;
+import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.util.Map;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -16,7 +17,7 @@ class Helper {
     private final static byte[] CRLF_BYTES = CRLF.getBytes();
 
     @SuppressWarnings("deprecation")
-    static void writeToClient(DataInputStream dis, DataOutputStream cacheDos, DataOutputStream proxyToClientDos) throws IOException {
+    static void writeToClient(DataInputStream dis, DataOutputStream... dataOutputStreams) throws IOException {
         StringBuilder headerSb = new StringBuilder();
         String line = dis.readLine();
         int length = -1;
@@ -33,7 +34,7 @@ class Helper {
         }
         if (length != -1)
             headerSb.append("Content-Length: ").append(length).append(CRLF);
-        writeToAll(headerSb.toString() + CRLF, cacheDos, proxyToClientDos);
+        writeToAll(headerSb.toString() + CRLF, dataOutputStreams);
 
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         try {
@@ -47,7 +48,7 @@ class Helper {
                     }
                     bos.write(buffer, 0, read);
                     bytesRead += read;
-                    writeToAll(bos.toByteArray(), cacheDos, proxyToClientDos);
+                    writeToAll(bos.toByteArray(), dataOutputStreams);
                     bos.reset();
                 }
             } else {
@@ -63,17 +64,20 @@ class Helper {
                         bos.write(buffer, 0, read);
                         chunkSize -= read;
                     }
-                    writeToAll(bos.toByteArray(), cacheDos, proxyToClientDos);
+                    writeToAll(bos.toByteArray(), dataOutputStreams);
                     bos.reset();
                 }
                 bos.write(CRLF_BYTES);
             }
         } catch (SocketTimeoutException ignored) {
         }
-        writeToAll(bos.toByteArray(), cacheDos, proxyToClientDos);
+        writeToAll(bos.toByteArray(), dataOutputStreams);
         bos.close();
         dis.close();
-        if (cacheDos != null) cacheDos.close();
+
+        for (DataOutputStream dataOutputStream : dataOutputStreams) {
+            dataOutputStream.close();
+        }
     }
 
     static Socket sendRequest(Map<String, String> headers, String requestBody) throws IOException {
@@ -106,22 +110,15 @@ class Helper {
         return socket;
     }
 
-    private static void writeToAll(String line, DataOutputStream bwForCache, DataOutputStream proxyToClientDos) throws IOException {
-        if (bwForCache != null) {
-            bwForCache.writeBytes(line);
-            bwForCache.flush();
-        }
-        proxyToClientDos.writeBytes(line);
-        proxyToClientDos.flush();
+    private static void writeToAll(String line, DataOutputStream... outputStreams) throws IOException {
+        writeToAll(line.getBytes(), outputStreams);
     }
 
-    private static void writeToAll(byte[] line, DataOutputStream bwForCache, DataOutputStream proxyToClientDos) throws IOException {
-        if (bwForCache != null) {
-            bwForCache.write(line);
-            bwForCache.flush();
+    private static void writeToAll(byte[] line, DataOutputStream... outputStreams) throws IOException {
+        for (DataOutputStream outputStream : outputStreams) {
+            outputStream.write(line);
+            outputStream.flush();
         }
-        proxyToClientDos.write(line);
-        proxyToClientDos.flush();
     }
 
     private static int getDecimal(String hex) {
@@ -134,5 +131,22 @@ class Helper {
             val = 16 * val + d;
         }
         return val;
+    }
+
+    static void communicateDirectly(InputStream inputStream, OutputStream outputStream) throws IOException {
+        try {
+            byte[] buffer = new byte[4096];
+            int read;
+            do {
+                read = inputStream.read(buffer);
+                if (read > 0) {
+                    outputStream.write(buffer, 0, read);
+                    if (inputStream.available() < 1) {
+                        outputStream.flush();
+                    }
+                }
+            } while (read >= 0);
+        } catch (SocketTimeoutException | SocketException ignored) {
+        }
     }
 }

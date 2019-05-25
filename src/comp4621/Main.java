@@ -12,9 +12,8 @@ import java.util.Scanner;
 public class Main {
     public static void main(String[] args) {
         String[] blockList = {
-                "abc"
+                "abc.com"
         };
-
 
         Thread command = new Thread(() -> {
             Scanner scanner = new Scanner(System.in);

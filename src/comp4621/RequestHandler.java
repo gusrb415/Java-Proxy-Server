@@ -80,19 +80,19 @@ class RequestHandler implements Runnable {
 
 	@Override
 	public void run() {
-		Map<String, String> headers = new HashMap<>();
-		int contentLength = -1;
+		Map<String, String> requestHeaders = new HashMap<>();
+
+		/*
+		Save all headers into map for sending to the server.
+		 */
 		try {
 			String line = proxyToClientBr.readLine();
 			while (!line.isEmpty()) {
-				if (line.toLowerCase().contains("content-length")) {
-					contentLength = Integer.parseInt(line.split(" ")[1]);
-				}
 				if (line.contains("HTTP/1."))
-					headers.put(null, line);
+					requestHeaders.put(null, line);
 				else {
 					int splitIndex = line.indexOf(':');
-					headers.put(line.substring(0, splitIndex), line.substring(splitIndex + 2));
+					requestHeaders.put(line.substring(0, splitIndex), line.substring(splitIndex + 2));
 				}
 				line = proxyToClientBr.readLine();
 			}
@@ -103,16 +103,30 @@ class RequestHandler implements Runnable {
 			return;
 		}
 
-		if (headers.isEmpty())
+		/*
+		No header is a wrong request.
+		 */
+		if (requestHeaders.isEmpty())
 			return;
 
+		/*
+		Read request body up to the content-length if exist.
+		 */
+		int contentLength = (requestHeaders.get("Content-Length") != null)
+				? Integer.parseInt(requestHeaders.get("Content-Length"))
+				: (requestHeaders.get("Content-length") != null)
+				? Integer.parseInt(requestHeaders.get("Content-length"))
+				: -1;
 		String requestBody = null;
 		if (contentLength != -1) {
 			try {
 				StringBuilder sb = new StringBuilder();
-				for (int i = 0; i < contentLength; ++i) {
-					char temp = (char) proxyToClientBr.read();
-					sb.append(temp);
+				char[] buffer = new char[4096];
+				int readCount = 0;
+				while(readCount < contentLength) {
+					int read = proxyToClientBr.read(buffer, 0, buffer.length);
+					sb.append(buffer, 0, read);
+					readCount += read;
 				}
 				requestBody = sb.toString();
 			} catch (IOException e) {
@@ -120,11 +134,13 @@ class RequestHandler implements Runnable {
 			}
 		}
 
-		String[] requestString = headers.get(null).split(" ");
+		String[] requestString = requestHeaders.get(null).split(" ");
 		String connectionType = requestString[0];
 		String urlString = requestString[1];
 
-
+		/*
+		Check if any url contains any blocked keywords
+		 */
 		if (blockedSites.stream().anyMatch(urlString::contains)) {
 			System.out.println("Blocked site requested : " + urlString + "\n");
 			try {
@@ -138,6 +154,12 @@ class RequestHandler implements Runnable {
 			return;
 		}
 
+		/*
+		Handles differently for
+		1. HTTPS
+		2. HTTP GET found in Cache
+		3. Rest
+		 */
 		if (connectionType.equals("CONNECT")) {
 			System.out.println("HTTPS Request for : " + urlString + "\n");
 			handleHTTPSRequest(urlString);
@@ -147,13 +169,14 @@ class RequestHandler implements Runnable {
 				sendCachedPageToClient(cache.get(urlString));
 			} else {
 				System.out.println("HTTP " + connectionType + " for: " + urlString + "\n");
-				sendNonCachedToClient(urlString, headers, requestBody);
+				sendNonCachedToClient(urlString, requestHeaders, requestBody);
 			}
 		}
 
+		/*
+		Close the socket would close the streams as well.
+		 */
 		try {
-			proxyToClientBr.close();
-			proxyToClientDos.close();
 			clientToProxySocket.close();
 		} catch (IOException e) {
 			e.printStackTrace();
@@ -163,7 +186,7 @@ class RequestHandler implements Runnable {
 	private void sendCachedPageToClient(File cachedFile) {
 		try {
 			DataInputStream dis = new DataInputStream(new FileInputStream(cachedFile));
-			Helper.writeToClient(dis, null, proxyToClientDos);
+			Helper.writeToClient(dis, proxyToClientDos);
 		} catch (IOException e) {
 			System.out.println(cachedFile.getName() + " not found locally.");
 			if(!cachedFile.delete())
@@ -207,6 +230,7 @@ class RequestHandler implements Runnable {
 		String url = urlWithPort.split(":")[0];
 		int port = Integer.parseInt(urlWithPort.split(":")[1]);
 		try {
+			System.out.println(InetAddress.getByName(url));
 			Socket proxyToServerSocket = new Socket(InetAddress.getByName(url), port);
 			proxyToServerSocket.setSoTimeout(3000);
 
@@ -215,31 +239,15 @@ class RequestHandler implements Runnable {
 
 			threadPool.execute(() -> {
 				try {
-					communicateDirectly(clientToProxySocket.getInputStream(), proxyToServerSocket.getOutputStream());
+					Helper.communicateDirectly(clientToProxySocket.getInputStream(), proxyToServerSocket.getOutputStream());
 				} catch (IOException ignored) {
 				}
 			});
-			communicateDirectly(proxyToServerSocket.getInputStream(), clientToProxySocket.getOutputStream());
+			Helper.communicateDirectly(proxyToServerSocket.getInputStream(), clientToProxySocket.getOutputStream());
 			proxyToServerSocket.close();
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
 	}
 
-	private void communicateDirectly(InputStream inputStream, OutputStream outputStream) throws IOException {
-		try {
-			byte[] buffer = new byte[4096];
-			int read;
-			do {
-				read = inputStream.read(buffer);
-				if (read > 0) {
-					outputStream.write(buffer, 0, read);
-					if (inputStream.available() < 1) {
-						outputStream.flush();
-					}
-				}
-			} while (read >= 0);
-		} catch (SocketTimeoutException | SocketException ignored) {
-		}
-	}
 }
