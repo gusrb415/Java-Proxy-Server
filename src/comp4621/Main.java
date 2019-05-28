@@ -15,6 +15,18 @@ public class Main {
                 "abc.com"
         };
 
+        Thread activeThreadCounter = new Thread(() -> {
+            int counter = 0;
+            try {
+                while(ProxyServer.running) {
+                    Thread.sleep(10 * 1000);
+                    System.out.println("The server has been running for " + ++counter * 10 + " seconds");
+                    System.out.println("Current thread pool size: " + ProxyServer.threadPool.getPoolSize());
+                    System.out.println();
+                }
+            } catch (InterruptedException ignored) { }
+        });
+
         Thread command = new Thread(() -> {
             Scanner scanner = new Scanner(System.in);
 
@@ -23,9 +35,10 @@ public class Main {
             String input;
             while (ProxyServer.running) {
                 input = scanner.nextLine().toLowerCase();
-                if (input.equals("close"))
+                if (input.equals("close")) {
+                    activeThreadCounter.interrupt();
                     ProxyServer.close();
-                else if (input.equals("clear"))
+                } else if (input.equals("clear"))
                     RequestHandler.clearCaches();
                 else
                     System.out.println(instruction);
@@ -35,6 +48,8 @@ public class Main {
 
         command.setDaemon(true);
         command.start();
+        activeThreadCounter.setDaemon(true);
+        activeThreadCounter.start();
         RequestHandler.blockUrl(args);
         RequestHandler.blockUrl(blockList);
         RequestHandler.clearCaches();
