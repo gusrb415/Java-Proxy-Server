@@ -157,10 +157,18 @@ class RequestHandler implements Runnable {
 		String[] requestString = requestHeaders.get(null).split(" ");
 		String connectionType = requestString[0];
 		String urlString = requestString[1];
-		if (cache.get(urlString) != null && connectionType.equals("GET")) {
+		boolean check = cache.get(urlString) != null && connectionType.equals("GET");
+		if (check) {
 			System.out.println("Cached Copy found for : " + urlString + CRLF);
-			sendCachedPageToClient(cache.get(urlString));
-		} else {
+			try {
+				Helper.writeToClient(new FileInputStream(cache.get(urlString)), proxyToClientOs);
+			} catch (IOException e) {
+				System.out.println("Failed retrieving cache, try requesting from remote server instead");
+				check = false;
+			}
+		}
+
+		if(!check) {
 			String httpOrHttps = (connectionType.equals("CONNECT")) ? "HTTPS" : "HTTP " + connectionType;
 			System.out.println(httpOrHttps + " for: " + urlString + CRLF);
 			sendNonCachedToClient(urlString, requestHeaders, requestBody);
@@ -173,16 +181,6 @@ class RequestHandler implements Runnable {
 			clientToProxySocket.close();
 		} catch (IOException e) {
 			e.printStackTrace();
-		}
-	}
-
-	private void sendCachedPageToClient(File cachedFile) {
-		try {
-			Helper.writeToClient(new FileInputStream(cachedFile), proxyToClientOs);
-		} catch (IOException e) {
-			System.out.println(cachedFile.getName() + " not found locally.");
-			if (!cachedFile.delete())
-				System.out.println(cachedFile.getName() + " cannot be deleted.");
 		}
 	}
 
