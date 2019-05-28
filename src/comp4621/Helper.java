@@ -2,7 +2,6 @@ package comp4621;
 
 import java.io.*;
 import java.net.Socket;
-import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.util.Map;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -92,7 +91,7 @@ class Helper {
         threadPool.execute(() -> {
             try {
                 OutputStream dos = socket.getOutputStream();
-                if(!isHttps) {
+                if (!isHttps) {
                     headers.forEach((key, value) -> {
                         try {
                             String line = (key == null ? value : (key + ": " + value)) + CRLF;
@@ -108,11 +107,10 @@ class Helper {
                     }
                 }
 
-                if(isHttps && dis != null) {
+                if (isHttps && dis != null) {
                     communicateDirectly(dis, dos);
                 }
-            } catch (IOException e) {
-                e.printStackTrace();
+            } catch (IOException ignored) {
             }
         });
 
@@ -147,14 +145,11 @@ class Helper {
     }
 
     static void communicateDirectly(InputStream inputStream, OutputStream outputStream) throws IOException {
-        try {
-            byte[] buffer = new byte[4096];
-            int read = inputStream.read(buffer);
-            while (read > -1) {
-                writeToAll(buffer, read, outputStream);
-                read = inputStream.read(buffer);
-            }
-        } catch (SocketTimeoutException | SocketException ignored) {
+        byte[] buffer = new byte[4096];
+        int read = inputStream.read(buffer);
+        while (read > -1) {
+            writeToAll(buffer, read, outputStream);
+            read = inputStream.read(buffer);
         }
     }
 }

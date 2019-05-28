@@ -30,7 +30,7 @@ class ProxyServer {
 		while (running) {
 			try {
 				threadPool.execute(new RequestHandler(serverSocket.accept()));
-			} catch(Exception ignored) {
+			} catch (Exception ignored) {
 			}
 		}
 	}

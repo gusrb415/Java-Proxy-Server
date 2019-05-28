@@ -18,13 +18,14 @@ public class Main {
         Thread activeThreadCounter = new Thread(() -> {
             int counter = 0;
             try {
-                while(ProxyServer.running) {
-                    Thread.sleep(10 * 1000);
+                while (ProxyServer.running) {
+                    Thread.sleep(10_000);
                     System.out.println("The server has been running for " + ++counter * 10 + " seconds");
                     System.out.println("Current thread pool size: " + ProxyServer.threadPool.getPoolSize());
                     System.out.println();
                 }
-            } catch (InterruptedException ignored) { }
+            } catch (InterruptedException ignored) {
+            }
         });
 
         Thread command = new Thread(() -> {

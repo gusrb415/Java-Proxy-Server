@@ -1,7 +1,5 @@
 package comp4621;
 
-import jdk.internal.util.xml.impl.Input;
-
 import java.io.*;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
@@ -160,10 +158,11 @@ class RequestHandler implements Runnable {
 		String connectionType = requestString[0];
 		String urlString = requestString[1];
 		if (cache.get(urlString) != null && connectionType.equals("GET")) {
-			System.out.println("Cached Copy found for : " + urlString + "\n");
+			System.out.println("Cached Copy found for : " + urlString + CRLF);
 			sendCachedPageToClient(cache.get(urlString));
 		} else {
-			System.out.println("HTTP " + connectionType + " for: " + urlString + "\n");
+			String httpOrHttps = (connectionType.equals("CONNECT")) ? "HTTPS" : "HTTP " + connectionType;
+			System.out.println(httpOrHttps + " for: " + urlString + CRLF);
 			sendNonCachedToClient(urlString, requestHeaders, requestBody);
 		}
 
@@ -200,7 +199,6 @@ class RequestHandler implements Runnable {
 
 			fileName = fileName.substring(0, Math.min(fileName.length(), 200));
 			File fileToCache = new File(CACHE_FOLDER + "/" + fileName);
-
 			boolean isHttps = headers.get(null).contains("CONNECT");
 			FileOutputStream fileToCacheBW = (!isHttps) ? new FileOutputStream(fileToCache) : null;
 			try {
