@@ -17,8 +17,9 @@ class Helper {
     private final static byte[] CRLF_BYTES = CRLF.getBytes();
 
     @SuppressWarnings("deprecation")
-    static void writeToClient(DataInputStream dis, DataOutputStream... dataOutputStreams) throws IOException {
+    static void writeToClient(InputStream is, OutputStream... outputStreams) throws IOException {
         StringBuilder headerSb = new StringBuilder();
+        DataInputStream dis = new DataInputStream(is);
         String line = dis.readLine();
         int length = -1;
         boolean chunked = false;
@@ -34,7 +35,7 @@ class Helper {
         }
         if (length != -1)
             headerSb.append("Content-Length: ").append(length).append(CRLF);
-        writeToAll(headerSb.toString() + CRLF, dataOutputStreams);
+        writeToAll(headerSb.toString() + CRLF, outputStreams);
 
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         try {
@@ -42,13 +43,13 @@ class Helper {
             if (!chunked) {
                 int bytesRead = 0;
                 while (bytesRead < length || length == -1) {
-                    int read = dis.read(buffer, 0, BUFFER_SIZE);
+                    int read = dis.read(buffer);
                     if (read == -1) {
                         break;
                     }
                     bos.write(buffer, 0, read);
                     bytesRead += read;
-                    writeToAll(bos.toByteArray(), dataOutputStreams);
+                    writeToAll(bos.toByteArray(), outputStreams);
                     bos.reset();
                 }
             } else {
@@ -58,50 +59,58 @@ class Helper {
                     bos.write(CRLF_BYTES);
                     if (hexChunkSize.equals("0"))
                         break;
-                    int chunkSize = getDecimal(hexChunkSize) + 2;
+                    int chunkSize = hexToDec(hexChunkSize) + 2;
                     while (chunkSize > 0) {
                         int read = dis.read(buffer, 0, chunkSize);
                         bos.write(buffer, 0, read);
                         chunkSize -= read;
                     }
-                    writeToAll(bos.toByteArray(), dataOutputStreams);
+                    writeToAll(bos.toByteArray(), outputStreams);
                     bos.reset();
                 }
                 bos.write(CRLF_BYTES);
             }
         } catch (SocketTimeoutException ignored) {
         }
-        writeToAll(bos.toByteArray(), dataOutputStreams);
+        writeToAll(bos.toByteArray(), outputStreams);
         bos.close();
         dis.close();
 
-        for (DataOutputStream dataOutputStream : dataOutputStreams) {
-            dataOutputStream.close();
+        for (OutputStream outputStream : outputStreams) {
+            outputStream.close();
         }
     }
 
-    static Socket sendRequest(Map<String, String> headers, String requestBody) throws IOException {
-        String host = headers.get("Host");
-        Socket socket = new Socket(host, 80);
+    static Socket sendRequest(Map<String, String> headers, byte[] requestBody, InputStream dis) throws IOException {
+        String[] hostArr = headers.get("Host").split(":");
+        boolean isHttps = headers.get(null).contains("CONNECT");
+        int port = (hostArr.length > 1) ? Integer.parseInt(hostArr[1]) : 80;
+
+        Socket socket = new Socket(hostArr[0], port);
         socket.setSoTimeout(10000);
         socket.setTcpNoDelay(true);
         threadPool.execute(() -> {
             try {
-                byte[] lineBreak = "\r\n".getBytes();
-                OutputStream os = socket.getOutputStream();
-                headers.forEach((key, value) -> {
-                    try {
-                        os.write((key == null) ? value.getBytes() : (key + ": " + value).getBytes());
-                        os.write(lineBreak);
-                    } catch (IOException ignored) {
+                OutputStream dos = socket.getOutputStream();
+                if(!isHttps) {
+                    headers.forEach((key, value) -> {
+                        try {
+                            String line = (key == null ? value : (key + ": " + value)) + CRLF;
+                            writeToAll(line, dos);
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    });
+                    writeToAll(CRLF, dos);
+                    if (requestBody != null) {
+                        writeToAll(requestBody, dos);
+                        writeToAll(CRLF_BYTES, dos);
                     }
-                });
-                os.write(lineBreak);
-                if (requestBody != null) {
-                    os.write(requestBody.getBytes());
-                    os.write(lineBreak);
                 }
-                os.flush();
+
+                if(isHttps && dis != null) {
+                    communicateDirectly(dis, dos);
+                }
             } catch (IOException e) {
                 e.printStackTrace();
             }
@@ -110,18 +119,22 @@ class Helper {
         return socket;
     }
 
-    private static void writeToAll(String line, DataOutputStream... outputStreams) throws IOException {
+    static void writeToAll(String line, OutputStream... outputStreams) throws IOException {
         writeToAll(line.getBytes(), outputStreams);
     }
 
-    private static void writeToAll(byte[] line, DataOutputStream... outputStreams) throws IOException {
-        for (DataOutputStream outputStream : outputStreams) {
-            outputStream.write(line);
+    private static void writeToAll(byte[] line, OutputStream... outputStreams) throws IOException {
+        writeToAll(line, line.length, outputStreams);
+    }
+
+    private static void writeToAll(byte[] line, int size, OutputStream... outputStreams) throws IOException {
+        for (OutputStream outputStream : outputStreams) {
+            outputStream.write(line, 0, size);
             outputStream.flush();
         }
     }
 
-    private static int getDecimal(String hex) {
+    private static int hexToDec(String hex) {
         String digits = "0123456789ABCDEF";
         hex = hex.toUpperCase();
         int val = 0;
@@ -136,16 +149,11 @@ class Helper {
     static void communicateDirectly(InputStream inputStream, OutputStream outputStream) throws IOException {
         try {
             byte[] buffer = new byte[4096];
-            int read;
-            do {
+            int read = inputStream.read(buffer);
+            while (read > -1) {
+                writeToAll(buffer, read, outputStream);
                 read = inputStream.read(buffer);
-                if (read > 0) {
-                    outputStream.write(buffer, 0, read);
-                    if (inputStream.available() < 1) {
-                        outputStream.flush();
-                    }
-                }
-            } while (read >= 0);
+            }
         } catch (SocketTimeoutException | SocketException ignored) {
         }
     }
