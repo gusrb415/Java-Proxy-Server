@@ -1,9 +1,9 @@
 package comp4621;
 
+import jdk.internal.util.xml.impl.Input;
+
 import java.io.*;
-import java.net.InetAddress;
 import java.net.Socket;
-import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,7 +12,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * Request Handler
@@ -28,24 +27,23 @@ import java.util.concurrent.ThreadPoolExecutor;
  */
 class RequestHandler implements Runnable {
 	private Socket clientToProxySocket;
-	private BufferedReader proxyToClientBr;
-	private DataOutputStream proxyToClientDos;
+	private InputStream proxyToClientIs;
+	private OutputStream proxyToClientOs;
 
 	private static Map<String, File> cache = new ConcurrentHashMap<>();
 	private static List<String> blockedSites = new ArrayList<>();
-	private static ThreadPoolExecutor threadPool = ProxyServer.threadPool;
 
 	private final static String CRLF = Helper.CRLF;
 	private final static String CACHE_FOLDER = "Cached";
 	private final static String HTTP_OK = "HTTP/1.1 200 OK" + CRLF + "Proxy-agent: ProxyServer/1.0" + CRLF;
-	private final static String HTTP_NOT_FOUND = "HTTP/1.1 404 NOT FOUND" + CRLF +"Proxy-agent: ProxyServer/1.0" + CRLF;
+	private final static String HTTP_NOT_FOUND = "HTTP/1.1 404 NOT FOUND" + CRLF + "Proxy-agent: ProxyServer/1.0" + CRLF;
 
 	RequestHandler(Socket clientSocket) {
 		this.clientToProxySocket = clientSocket;
 		try {
 			clientToProxySocket.setSoTimeout(3000);
-			proxyToClientBr = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-			proxyToClientDos = new DataOutputStream(clientSocket.getOutputStream());
+			proxyToClientIs = clientSocket.getInputStream();
+			proxyToClientOs = clientSocket.getOutputStream();
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
@@ -71,8 +69,8 @@ class RequestHandler implements Runnable {
 
 	static void blockUrl(String... urls) {
 		for (String url : urls) {
-		    if(url.isEmpty())
-		        continue;
+			if (url.isEmpty())
+				continue;
 			blockedSites.add(url);
 			System.out.println(url + " added to the block list");
 		}
@@ -85,12 +83,15 @@ class RequestHandler implements Runnable {
 		/*
 		Save all headers into map for sending to the server.
 		 */
+		BufferedReader proxyToClientBr = new BufferedReader(new InputStreamReader(proxyToClientIs));
 		try {
 			String line = proxyToClientBr.readLine();
+			boolean firstLine = true;
 			while (!line.isEmpty()) {
-				if (line.contains("HTTP/1."))
+				if (firstLine) {
 					requestHeaders.put(null, line);
-				else {
+					firstLine = false;
+				} else {
 					int splitIndex = line.indexOf(':');
 					requestHeaders.put(line.substring(0, splitIndex), line.substring(splitIndex + 2));
 				}
@@ -117,36 +118,32 @@ class RequestHandler implements Runnable {
 				: (requestHeaders.get("Content-length") != null)
 				? Integer.parseInt(requestHeaders.get("Content-length"))
 				: -1;
-		String requestBody = null;
+		byte[] requestBody = null;
 		if (contentLength != -1) {
 			try {
 				StringBuilder sb = new StringBuilder();
-				char[] buffer = new char[4096];
+				char[] buffer = new char[1024];
 				int readCount = 0;
-				while(readCount < contentLength) {
-					int read = proxyToClientBr.read(buffer, 0, buffer.length);
+				while (readCount < contentLength) {
+					int read = proxyToClientBr.read(buffer);
 					sb.append(buffer, 0, read);
 					readCount += read;
 				}
-				requestBody = sb.toString();
+				requestBody = sb.toString().getBytes();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
 		}
 
-		String[] requestString = requestHeaders.get(null).split(" ");
-		String connectionType = requestString[0];
-		String urlString = requestString[1];
 
 		/*
 		Check if any url contains any blocked keywords
 		 */
-		if (blockedSites.stream().anyMatch(urlString::contains)) {
-			System.out.println("Blocked site requested : " + urlString + "\n");
+		String host = requestHeaders.get("Host");
+		if (blockedSites.stream().anyMatch(host::contains)) {
+			System.out.println("Blocked site requested : " + host + "\n");
 			try {
-				proxyToClientDos.writeBytes(HTTP_NOT_FOUND + CRLF);
-				proxyToClientDos.close();
-				proxyToClientBr.close();
+				Helper.writeToAll(HTTP_NOT_FOUND + CRLF, proxyToClientOs);
 				clientToProxySocket.close();
 			} catch (IOException e) {
 				e.printStackTrace();
@@ -156,21 +153,18 @@ class RequestHandler implements Runnable {
 
 		/*
 		Handles differently for
-		1. HTTPS
-		2. HTTP GET found in Cache
-		3. Rest
+		1. HTTP GET found in Cache
+		2. Rest
 		 */
-		if (connectionType.equals("CONNECT")) {
-			System.out.println("HTTPS Request for : " + urlString + "\n");
-			handleHTTPSRequest(urlString);
+		String[] requestString = requestHeaders.get(null).split(" ");
+		String connectionType = requestString[0];
+		String urlString = requestString[1];
+		if (cache.get(urlString) != null && connectionType.equals("GET")) {
+			System.out.println("Cached Copy found for : " + urlString + "\n");
+			sendCachedPageToClient(cache.get(urlString));
 		} else {
-			if (cache.get(urlString) != null && connectionType.equals("GET")) {
-				System.out.println("Cached Copy found for : " + urlString + "\n");
-				sendCachedPageToClient(cache.get(urlString));
-			} else {
-				System.out.println("HTTP " + connectionType + " for: " + urlString + "\n");
-				sendNonCachedToClient(urlString, requestHeaders, requestBody);
-			}
+			System.out.println("HTTP " + connectionType + " for: " + urlString + "\n");
+			sendNonCachedToClient(urlString, requestHeaders, requestBody);
 		}
 
 		/*
@@ -185,16 +179,15 @@ class RequestHandler implements Runnable {
 
 	private void sendCachedPageToClient(File cachedFile) {
 		try {
-			DataInputStream dis = new DataInputStream(new FileInputStream(cachedFile));
-			Helper.writeToClient(dis, proxyToClientDos);
+			Helper.writeToClient(new FileInputStream(cachedFile), proxyToClientOs);
 		} catch (IOException e) {
 			System.out.println(cachedFile.getName() + " not found locally.");
-			if(!cachedFile.delete())
+			if (!cachedFile.delete())
 				System.out.println(cachedFile.getName() + " cannot be deleted.");
 		}
 	}
 
-	private void sendNonCachedToClient(String urlString, Map<String, String> headers, String requestBody) {
+	private void sendNonCachedToClient(String urlString, Map<String, String> headers, byte[] requestBody) {
 		try {
 			int fileExtensionIndex = urlString.lastIndexOf(".");
 			String fileName = urlString.substring(0, fileExtensionIndex)
@@ -207,16 +200,24 @@ class RequestHandler implements Runnable {
 
 			fileName = fileName.substring(0, Math.min(fileName.length(), 200));
 			File fileToCache = new File(CACHE_FOLDER + "/" + fileName);
-			DataOutputStream fileToCacheBW = new DataOutputStream(new FileOutputStream(fileToCache));
+
+			boolean isHttps = headers.get(null).contains("CONNECT");
+			FileOutputStream fileToCacheBW = (!isHttps) ? new FileOutputStream(fileToCache) : null;
 			try {
-				Socket proxyToServerSocket = Helper.sendRequest(headers, requestBody);
-				DataInputStream dis = new DataInputStream(proxyToServerSocket.getInputStream());
-				Helper.writeToClient(dis, fileToCacheBW, proxyToClientDos);
-				cache.put(urlString, fileToCache);
-				fileToCacheBW.close();
+				Socket proxyToServerSocket = Helper.sendRequest(headers, requestBody, proxyToClientIs);
+				if (isHttps) {
+					Helper.writeToAll(HTTP_OK + CRLF, proxyToClientOs);
+					Helper.communicateDirectly(proxyToServerSocket.getInputStream(), proxyToClientOs);
+				} else {
+					Helper.writeToClient(proxyToServerSocket.getInputStream(), fileToCacheBW, proxyToClientOs);
+					cache.put(urlString, fileToCache);
+				}
+				proxyToServerSocket.close();
 			} catch (FileNotFoundException e) {
-				fileToCacheBW.close();
-				Files.delete(fileToCache.toPath());
+				if (!isHttps) {
+					fileToCacheBW.close();
+					Files.delete(fileToCache.toPath());
+				}
 				System.out.println(urlString + " not found in the remote server.");
 				System.out.println();
 			} catch (IOException ignored) {
@@ -225,29 +226,4 @@ class RequestHandler implements Runnable {
 			e.printStackTrace();
 		}
 	}
-
-	private void handleHTTPSRequest(String urlWithPort) {
-		String url = urlWithPort.split(":")[0];
-		int port = Integer.parseInt(urlWithPort.split(":")[1]);
-		try {
-			System.out.println(InetAddress.getByName(url));
-			Socket proxyToServerSocket = new Socket(InetAddress.getByName(url), port);
-			proxyToServerSocket.setSoTimeout(3000);
-
-			proxyToClientDos.writeBytes(HTTP_OK + CRLF);
-			proxyToClientDos.flush();
-
-			threadPool.execute(() -> {
-				try {
-					Helper.communicateDirectly(clientToProxySocket.getInputStream(), proxyToServerSocket.getOutputStream());
-				} catch (IOException ignored) {
-				}
-			});
-			Helper.communicateDirectly(proxyToServerSocket.getInputStream(), clientToProxySocket.getOutputStream());
-			proxyToServerSocket.close();
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-	}
-
 }
